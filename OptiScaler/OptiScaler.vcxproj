@@ -326,6 +326,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="shaders\depth_invert\DI_Dx12.h" />
     <ClInclude Include="shaders\depth_invert\precompiled\DI_Shader.h" />
     <ClInclude Include="shaders\depth_transfer\DT_Vk.h" />
+    <ClInclude Include="shaders\depth_transfer\precompile\dt_int_Shader_Vk.h" />
     <ClInclude Include="shaders\depth_transfer\precompile\dt_Shader_Vk.h" />
     <ClInclude Include="shaders\format_transfer\precompile\FT_Shader.h" />
     <ClInclude Include="shaders\hud_copy\HudCopy_Common.h" />

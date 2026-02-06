@@ -1,8 +1,6 @@
 #pragma once
 #include "SysUtils.h"
 
-// #define VULKAN_DEBUG_LAYER
-
 class VulkanHooks
 {
   public:
