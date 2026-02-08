@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "XeSS_Vulkan.h"
 
 #include "NVNGX_Parameter.h"

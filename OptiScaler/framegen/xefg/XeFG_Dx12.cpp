@@ -1,5 +1,5 @@
+#include "pch.h"
 #include "XeFG_Dx12.h"
-
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
 #include <resource_tracking/ResTrack_dx12.h>

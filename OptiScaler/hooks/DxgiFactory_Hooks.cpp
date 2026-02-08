@@ -1,7 +1,6 @@
+#include "pch.h"
 #include "DxgiFactory_Hooks.h"
-
 #include <Config.h>
-
 #include "D3D12_Hooks.h"
 
 #include <spoofing/Dxgi_Spoofing.h>

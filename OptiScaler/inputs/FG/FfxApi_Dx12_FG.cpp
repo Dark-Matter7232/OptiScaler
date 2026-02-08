@@ -1,6 +1,6 @@
-#include "FfxApi_Dx12_FG.h"
-
 #include "pch.h"
+
+#include "FfxApi_Dx12_FG.h"
 
 #include <Util.h>
 #include <Config.h>

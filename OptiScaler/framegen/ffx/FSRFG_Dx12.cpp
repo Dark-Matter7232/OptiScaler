@@ -1,5 +1,6 @@
-#include "FSRFG_Dx12.h"
+#include "pch.h"
 
+#include "FSRFG_Dx12.h"
 #include <State.h>
 
 #include <hudfix/Hudfix_Dx12.h>

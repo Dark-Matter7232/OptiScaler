@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "ResTrack_dx12.h"
 
 #include <Config.h>

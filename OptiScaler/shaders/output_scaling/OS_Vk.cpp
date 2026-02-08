@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "OS_Vk.h"
 
 #define A_CPU

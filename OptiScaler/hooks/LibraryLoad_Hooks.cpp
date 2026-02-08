@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "LibraryLoad_Hooks.h"
 
 #include <Config.h>

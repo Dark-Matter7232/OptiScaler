@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "dllmain.h"
 
 #include "Util.h"

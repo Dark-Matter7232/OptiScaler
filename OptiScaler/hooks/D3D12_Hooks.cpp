@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "D3D12_Hooks.h"
 
 #include <Util.h>
