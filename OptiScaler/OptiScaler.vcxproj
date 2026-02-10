@@ -317,8 +317,8 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="hooks\Dxgi_Hooks.h" />
     <ClInclude Include="hooks\FG_Hooks.h" />
     <ClInclude Include="hooks\LibraryLoad_Hooks.h" />
-    <ClInclude Include="hooks\VulkanwDx12\CommandBuffer_StateTracker.h" />
-    <ClInclude Include="hooks\VulkanwDx12\VulkanwDx12_Hooks.h" />
+    <ClInclude Include="hooks\CommandBuffer_StateTracker.h" />
+    <ClInclude Include="hooks\VulkanwDx12_Hooks.h" />
     <ClInclude Include="inputs\FSR2_Dx11.h" />
     <ClInclude Include="inputs\FSR2_Vk.h" />
     <ClInclude Include="inputs\XeSS_Dx11.h" />
@@ -532,7 +532,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="hooks\FG_Hooks.cpp" />
     <ClCompile Include="hooks\Kernel_Hooks.cpp" />
     <ClCompile Include="hooks\LibraryLoad_Hooks.cpp" />
-    <ClCompile Include="hooks\VulkanwDx12\VulkanwDx12_Hooks.cpp" />
+    <ClCompile Include="hooks\VulkanwDx12_Hooks.cpp" />
     <ClCompile Include="inputs\FSR2_Dx11.cpp" />
     <ClCompile Include="inputs\FSR2_Vk.cpp" />
     <ClCompile Include="inputs\XeSS_Dx11.cpp" />

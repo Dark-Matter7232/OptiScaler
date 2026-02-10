@@ -2,9 +2,10 @@
 #include "Vulkan_Spoofing.h"
 
 #include <Config.h>
+#include <SysUtils.h>
 
 #include <proxies/KernelBase_Proxy.h>
-#include <hooks/VulkanwDx12/VulkanwDx12_Hooks.h>
+#include <hooks/VulkanwDx12_Hooks.h>
 
 #include <magic_enum.hpp>
 

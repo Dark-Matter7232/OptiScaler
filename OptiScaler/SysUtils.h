@@ -40,6 +40,9 @@
 // Enables LOG_DEBUG_ONLY logs
 // #define DETAILED_DEBUG_LOGS
 
+// Enables Vulkan validation layers
+// #define VULKAN_DEBUG_LAYER
+
 // Enable D3D12 Debug Layers
 // #define ENABLE_DEBUG_LAYER_DX12
 

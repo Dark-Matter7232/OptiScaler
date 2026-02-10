@@ -1,6 +1,10 @@
+#include <pch.h>
+
 #include "DT_Vk.h"
+
 #include "precompile/dt_Shader_Vk.h"
 #include "precompile/dt_int_Shader_Vk.h"
+
 #include <Config.h>
 
 // Helper function to determine if format is integer or float

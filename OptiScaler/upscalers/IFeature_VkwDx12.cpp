@@ -1,11 +1,14 @@
+#include <pch.h>
+
 #include "IFeature_VkwDx12.h"
 
 #include <Config.h>
+#include <SysUtils.h>
 
 #include <proxies/DXGI_Proxy.h>
 #include <proxies/D3D12_Proxy.h>
 
-#include <hooks/VulkanwDx12/VulkanwDx12_Hooks.h>
+#include <hooks/VulkanwDx12_Hooks.h>
 
 #include <detours/detours.h>
 
@@ -392,96 +395,6 @@ bool IFeature_VkwDx12::CreateVulkanCopyCommandBuffer()
     return true;
 }
 
-// bool IFeature_VkwDx12::CopyVulkanImageToShared(VkCommandBuffer InCmdBuffer, NVSDK_NGX_Resource_VK* InParam,
-//                                                VkImage InDestImage, bool IsDepth)
-//{
-//     LOG_FUNC();
-//
-//     VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-//     if (IsDepth)
-//         aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-//
-//     // Transition source image to transfer src optimal
-//     VkImageMemoryBarrier srcBarrier = {};
-//     srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-//     srcBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-//     srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-//     srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     srcBarrier.image = InParam->Resource.ImageViewInfo.Image;
-//     srcBarrier.subresourceRange = InParam->Resource.ImageViewInfo.SubresourceRange;
-//     srcBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-//     srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-//
-//     vkCmdPipelineBarrier(InCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
-//                          nullptr, 0, nullptr, 1, &srcBarrier);
-//
-//     // Transition dest image to transfer dst optimal
-//     VkImageMemoryBarrier dstBarrier = {};
-//     dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-//     dstBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-//     dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-//     dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     dstBarrier.image = InDestImage;
-//     dstBarrier.subresourceRange = InParam->Resource.ImageViewInfo.SubresourceRange;
-//     dstBarrier.srcAccessMask = 0;
-//     dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-//
-//     vkCmdPipelineBarrier(InCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
-//     nullptr,
-//                          0, nullptr, 1, &dstBarrier);
-//
-//     // Copy image
-//     VkImageCopy copyRegion = {};
-//     copyRegion.srcSubresource.aspectMask = aspectMask;
-//     copyRegion.srcSubresource.mipLevel = 0;
-//     copyRegion.srcSubresource.baseArrayLayer = 0;
-//     copyRegion.srcSubresource.layerCount = 1;
-//     copyRegion.dstSubresource.aspectMask = aspectMask;
-//     copyRegion.dstSubresource.mipLevel = 0;
-//     copyRegion.dstSubresource.baseArrayLayer = 0;
-//     copyRegion.dstSubresource.layerCount = 1;
-//     copyRegion.extent.width = InParam->Resource.ImageViewInfo.Width;
-//     copyRegion.extent.height = InParam->Resource.ImageViewInfo.Height;
-//     copyRegion.extent.depth = 1;
-//
-//     vkCmdCopyImage(InCmdBuffer, InParam->Resource.ImageViewInfo.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-//                    InDestImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-//
-//     // Transition dest image to shader read optimal (for D3D12 access)
-//     VkImageMemoryBarrier shaderReadBarrier = {};
-//     shaderReadBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-//     shaderReadBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-//     shaderReadBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-//     shaderReadBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     shaderReadBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     shaderReadBarrier.image = InDestImage;
-//     shaderReadBarrier.subresourceRange = InParam->Resource.ImageViewInfo.SubresourceRange;
-//     shaderReadBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-//     shaderReadBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-//
-//     vkCmdPipelineBarrier(InCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-//                          nullptr, 0, nullptr, 1, &shaderReadBarrier);
-//
-//     // Restore source image layout
-//     VkImageMemoryBarrier restoreSrcBarrier = {};
-//     restoreSrcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-//     restoreSrcBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-//     restoreSrcBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-//     restoreSrcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     restoreSrcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-//     restoreSrcBarrier.image = InParam->Resource.ImageViewInfo.Image;
-//     restoreSrcBarrier.subresourceRange = InParam->Resource.ImageViewInfo.SubresourceRange;
-//     restoreSrcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-//     restoreSrcBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-//
-//     vkCmdPipelineBarrier(InCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-//                          nullptr, 0, nullptr, 1, &restoreSrcBarrier);
-//
-//     return true;
-// }
-
 uint32_t IFeature_VkwDx12::FindVulkanMemoryTypeIndex(uint32_t MemoryTypeBits, VkMemoryPropertyFlags PropertyFlags)
 {
     VkPhysicalDeviceMemoryProperties memoryProperties = {};
@@ -629,14 +542,6 @@ bool IFeature_VkwDx12::CreateSharedTexture(const VkImageCreateInfo& ImageInfo, V
     };
 
     VkMemoryPropertyFlags memoryFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    //// Depth formats may need different memory properties for D3D12 interop
-    // if (dxgiFormat == DXGI_FORMAT_D32_FLOAT || dxgiFormat == DXGI_FORMAT_D16_UNORM ||
-    //     dxgiFormat == DXGI_FORMAT_D24_UNORM_S8_UINT || dxgiFormat == DXGI_FORMAT_D32_FLOAT_S8X24_UINT)
-    //{
-    //     // For depth formats, don't require device-local (shared depth might not support it)
-    //     memoryFlags = 0; // Let FindVulkanMemoryTypeIndex pick the best available
-    //     LOG_DEBUG("Using flexible memory properties for depth format interop");
-    // }
 
     const VkMemoryAllocateInfo memoryAllocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -687,8 +592,6 @@ bool IFeature_VkwDx12::CopyTextureFromVkToDx12(VkCommandBuffer InCmdBuffer, NVSD
                                                VK_TEXTURE2D_RESOURCE_C* OutResource, ResourceCopy_Vk* InCopyShader,
                                                bool InCopy, bool InDepth)
 {
-    LOG_FUNC();
-
     // Convert VkFormat to DXGI_FORMAT early for validation
     DXGI_FORMAT dxgiFormat = VkFormatToDxgiFormat(InParam->Resource.ImageViewInfo.Format);
     if (dxgiFormat == DXGI_FORMAT_UNKNOWN)
@@ -792,10 +695,6 @@ bool IFeature_VkwDx12::CopyTextureFromVkToDx12(VkCommandBuffer InCmdBuffer, NVSD
     {
         if (isDepthFormat)
         {
-            // LOG_DEBUG("Using DepthTransfer_Vk for format: {} ({})",
-            //           magic_enum::enum_name(InParam->Resource.ImageViewInfo.Format),
-            //           (int) InParam->Resource.ImageViewInfo.Format);
-
             if (!DT->CanRender())
             {
                 LOG_ERROR("DepthTransfer_Vk not initialized!");
@@ -881,10 +780,6 @@ bool IFeature_VkwDx12::CopyTextureFromVkToDx12(VkCommandBuffer InCmdBuffer, NVSD
         }
         else
         {
-            // LOG_DEBUG("Using ResourceCopy_Vk for format: {} ({})",
-            //           magic_enum::enum_name(InParam->Resource.ImageViewInfo.Format),
-            //           (int) InParam->Resource.ImageViewInfo.Format);
-
             if (!InCopyShader->CanRender())
             {
                 LOG_ERROR("ResourceCopy_Vk not initialized!");
