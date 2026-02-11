@@ -483,9 +483,6 @@ inline static void InitNGXParameters(NVSDK_NGX_Parameter* InParams)
     InParams->Set(NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 1);
     InParams->Set(NVSDK_NGX_Parameter_RTXValue, 0);
 
-    InParams->Set(NVSDK_NGX_Parameter_DeepResolve_Available, 0);
-    InParams->Set(NVSDK_NGX_EParameter_DeepDVC_Available, 0);
-
     if (!State::Instance().isRunningOnNvidia)
     {
         InParams->Set("SuperSamplingDenoising.NeedsUpdatedDriver", 0);
