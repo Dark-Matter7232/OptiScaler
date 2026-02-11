@@ -304,6 +304,21 @@ VkResult VulkanSpoofing::hkvkCreateInstance(VkInstanceCreateInfo* pCreateInfo, c
         newExtensionList.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
+    LOG_INFO("Adding Vulkan w/Dx12 extensions");
+    if (vkInstanceExtensions.size() == 0 ||
+        vkInstanceExtensions.contains(std::string(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME)))
+    {
+        LOG_DEBUG("  Adding {}", VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+        newExtensionList.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+    }
+
+    if (vkInstanceExtensions.size() == 0 ||
+        vkInstanceExtensions.contains(std::string(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME)))
+    {
+        LOG_DEBUG("  Adding {}", VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+        newExtensionList.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+    }
+
     LOG_DEBUG("Layer count: {}", pCreateInfo->enabledLayerCount);
     for (size_t i = 0; i < pCreateInfo->enabledLayerCount; i++)
         LOG_DEBUG("  {}", pCreateInfo->ppEnabledLayerNames[i]);
@@ -368,8 +383,11 @@ VkResult VulkanSpoofing::hkvkCreateDevice(VkPhysicalDevice physicalDevice, VkDev
             auto bufferDeviceAddr = std::strcmp(extName, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0;
             auto mvPerViewAttr = std::strcmp(extName, VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) == 0;
             auto nvLowLatency = std::strcmp(extName, VK_NV_LOW_LATENCY_EXTENSION_NAME) == 0;
+            auto nvOpticalFlow = std::strcmp(extName, VK_NV_OPTICAL_FLOW_EXTENSION_NAME) == 0;
+            auto nvPresentMeter = std::strcmp(extName, VK_NV_PRESENT_METERING_EXTENSION_NAME) == 0;
 
-            if (binaryImport || imgViewHandle || bufferDeviceAddr || mvPerViewAttr || nvLowLatency)
+            if (binaryImport || imgViewHandle || bufferDeviceAddr || mvPerViewAttr || nvLowLatency || nvOpticalFlow ||
+                nvPresentMeter)
             {
                 LOG_DEBUG("Removing {}", extName);
                 continue;
@@ -542,7 +560,11 @@ inline static VkResult hkvkEnumerateDeviceExtensionProperties(VkPhysicalDevice p
         // Count query, modify and add 5 to final count
         if (pProperties == nullptr && pPropertyCount != nullptr && count == 0)
         {
-            *pPropertyCount += 5;
+            if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::Nukems)
+                *pPropertyCount += 7;
+            else
+                *pPropertyCount += 5;
+
             vkEnumerateDeviceExtensionPropertiesCount = *pPropertyCount;
             LOG_TRACE("vkEnumerateDeviceExtensionProperties count: {}", *pPropertyCount);
             return result;
@@ -573,6 +595,15 @@ inline static VkResult hkvkEnumerateDeviceExtensionProperties(VkPhysicalDevice p
             VkExtensionProperties bda { VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
                                         VK_EXT_BUFFER_DEVICE_ADDRESS_SPEC_VERSION };
             memcpy(&pProperties[*pPropertyCount - 5], &bda, sizeof(VkExtensionProperties));
+
+            if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::Nukems)
+            {
+                VkExtensionProperties of { VK_NV_OPTICAL_FLOW_EXTENSION_NAME, VK_NV_OPTICAL_FLOW_SPEC_VERSION };
+                memcpy(&pProperties[*pPropertyCount - 6], &of, sizeof(VkExtensionProperties));
+
+                VkExtensionProperties pm { VK_NV_PRESENT_METERING_EXTENSION_NAME, VK_NV_PRESENT_METERING_SPEC_VERSION };
+                memcpy(&pProperties[*pPropertyCount - 7], &pm, sizeof(VkExtensionProperties));
+            }
         }
         else
         {
