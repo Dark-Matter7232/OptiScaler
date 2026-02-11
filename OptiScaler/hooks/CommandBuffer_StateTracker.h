@@ -114,6 +114,8 @@ struct BindPointState
 
     // NEW: Timeline of descriptor bind calls
     std::vector<DescriptorBindCall> DescriptorBindCalls;
+
+    BindPointState() { DescriptorBindCalls.reserve(4); }
 };
 
 struct DynamicState
@@ -230,6 +232,12 @@ struct ReplayParams
     bool ReplayComputeToo = false;
 };
 
+struct CommandBufferStateEntry
+{
+    std::shared_ptr<CommandBufferState> State;
+    std::mutex Mutex; // Fine-grained lock per command buffer
+};
+
 class CommandBufferStateTracker
 {
   public:
@@ -245,7 +253,7 @@ class CommandBufferStateTracker
             if (_poolToQueueFamily.find(pool) != _poolToQueueFamily.end())
             {
                 // Pool already initialized - only need to map command buffers
-                std::unique_lock lock(_mtx);
+                std::unique_lock mapLock(_statesMapMutex);
                 for (uint32_t i = 0; i < count; ++i)
                 {
                     _cmdBufferToPool[pCommandBuffers[i]] = pool;
@@ -273,7 +281,7 @@ class CommandBufferStateTracker
             }
 
             // Map command buffers
-            std::unique_lock lock(_mtx);
+            std::unique_lock mapLock(_statesMapMutex);
             for (uint32_t i = 0; i < count; ++i)
             {
                 _cmdBufferToPool[pCommandBuffers[i]] = pool;
@@ -287,52 +295,71 @@ class CommandBufferStateTracker
             return;
 
         const uint32_t flags = (pBeginInfo) ? pBeginInfo->flags : 0;
-        std::scoped_lock lock(_mtx);
 
-        auto poolIt = _cmdBufferToPool.find(cmd);
-        if (poolIt == _cmdBufferToPool.end())
+        // Fast path: Try to get existing entry with read lock
+        std::shared_ptr<CommandBufferStateEntry> entry;
         {
-            auto& statePtr = _states[cmd];
-            if (!statePtr)
-                statePtr = std::make_shared<CommandBufferState>();
-            statePtr->ResetForNewRecording(flags, 0);
-            return;
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it != _states.end())
+                entry = it->second;
         }
 
-        VkCommandPool pool = poolIt->second;
-
-        // Lock-free atomic read
-        std::shared_lock poolLock(_poolMetadataMutex);
-        auto epochIt = _poolEpochs.find(pool);
-
-        uint64_t currentEpoch;
-        if (epochIt == _poolEpochs.end())
+        // Slow path: Create new entry if needed
+        if (!entry)
         {
-            poolLock.unlock();
-            std::unique_lock exclusiveLock(_poolMetadataMutex);
+            std::unique_lock mapLock(_statesMapMutex);
+            auto& entryRef = _states[cmd];
+            if (!entryRef)
+                entryRef = std::make_shared<CommandBufferStateEntry>();
+            entry = entryRef;
+        }
 
-            // Double-check after exclusive lock
-            epochIt = _poolEpochs.find(pool);
+        // Get pool and epoch info (only needs _cmdBufferToPool lock)
+        VkCommandPool pool = VK_NULL_HANDLE;
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto poolIt = _cmdBufferToPool.find(cmd);
+            if (poolIt != _cmdBufferToPool.end())
+                pool = poolIt->second;
+        }
+
+        uint64_t currentEpoch = 0;
+        if (pool != VK_NULL_HANDLE)
+        {
+            // Lock-free atomic read
+            std::shared_lock poolLock(_poolMetadataMutex);
+            auto epochIt = _poolEpochs.find(pool);
+
             if (epochIt == _poolEpochs.end())
             {
-                currentEpoch = _globalEpochCounter.load(std::memory_order_acquire);
-                _poolEpochs[pool] = std::make_shared<std::atomic<uint64_t>>(currentEpoch);
+                poolLock.unlock();
+                std::unique_lock exclusiveLock(_poolMetadataMutex);
+
+                // Double-check after exclusive lock
+                epochIt = _poolEpochs.find(pool);
+                if (epochIt == _poolEpochs.end())
+                {
+                    currentEpoch = _globalEpochCounter.load(std::memory_order_acquire);
+                    _poolEpochs[pool] = std::make_shared<std::atomic<uint64_t>>(currentEpoch);
+                }
+                else
+                {
+                    currentEpoch = epochIt->second->load(std::memory_order_acquire);
+                }
             }
             else
             {
                 currentEpoch = epochIt->second->load(std::memory_order_acquire);
             }
         }
-        else
-        {
-            currentEpoch = epochIt->second->load(std::memory_order_acquire);
-        }
 
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        // Now lock only THIS command buffer's state
+        std::scoped_lock stateLock(entry->Mutex);
+        if (!entry->State)
+            entry->State = std::make_shared<CommandBufferState>();
 
-        statePtr->ResetForNewRecording(flags, currentEpoch);
+        entry->State->ResetForNewRecording(flags, currentEpoch);
     }
 
     void OnEnd(VkCommandBuffer cmd)
@@ -340,10 +367,22 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto it = _states.find(cmd);
-        if (it != _states.end() && it->second)
-            it->second->Recording = false;
+        // Fast path: get entry with read lock
+        std::shared_ptr<CommandBufferStateEntry> entry;
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it != _states.end())
+                entry = it->second;
+        }
+
+        if (!entry)
+            return;
+
+        // Lock only this command buffer's state
+        std::scoped_lock stateLock(entry->Mutex);
+        if (entry->State)
+            entry->State->Recording = false;
     }
 
     void OnReset(VkCommandBuffer cmd)
@@ -351,10 +390,22 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto it = _states.find(cmd);
-        if (it != _states.end() && it->second)
-            it->second->ResetAll();
+        // Fast path: get entry with read lock
+        std::shared_ptr<CommandBufferStateEntry> entry;
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it != _states.end())
+                entry = it->second;
+        }
+
+        if (!entry)
+            return;
+
+        // Lock only this command buffer's state
+        std::scoped_lock stateLock(entry->Mutex);
+        if (entry->State)
+            entry->State->ResetAll();
     }
 
     void OnResetPool(VkCommandPool pool)
@@ -377,19 +428,6 @@ class CommandBufferStateTracker
         {
             _poolEpochs[pool] = std::make_shared<std::atomic<uint64_t>>(newEpoch);
         }
-
-        // if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
-        //     return;
-
-        //// Invalidate only command buffers from this specific pool by incrementing its epoch
-        // std::scoped_lock lock(_mtx);
-
-        //_globalEpochCounter++;
-        //_poolEpochs[pool] = _globalEpochCounter;
-
-        //// LOG_DEBUG("Pool {:X} reset - pool epoch set to {} - command buffers from THIS POOL invalidated until next "
-        ////           "vkBeginCommandBuffer",
-        ////           (size_t) pool, _globalEpochCounter);
     }
 
     void OnBindPipeline(VkCommandBuffer cmd, VkPipelineBindPoint bindPoint, VkPipeline pipeline)
@@ -397,16 +435,35 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        // Fast path: Try to get existing entry with read lock
+        std::shared_ptr<CommandBufferStateEntry> entry;
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it != _states.end())
+                entry = it->second;
+        }
+
+        // Slow path: Create new entry if needed
+        if (!entry)
+        {
+            std::unique_lock mapLock(_statesMapMutex);
+            auto& entryRef = _states[cmd];
+            if (!entryRef)
+                entryRef = std::make_shared<CommandBufferStateEntry>();
+            entry = entryRef;
+        }
+
+        // Now lock only THIS command buffer's state
+        std::scoped_lock stateLock(entry->Mutex);
+        if (!entry->State)
+            entry->State = std::make_shared<CommandBufferState>();
 
         auto idx = ToIndex(bindPoint);
         if (!idx.has_value())
-            return; // Unsupported bind point - ignore
+            return;
 
-        statePtr->BP[static_cast<uint32_t>(*idx)].Pipeline = pipeline;
+        entry->State->BP[static_cast<uint32_t>(*idx)].Pipeline = pipeline;
     }
 
     void OnBindDescriptorSets(VkCommandBuffer cmd, VkPipelineBindPoint bindPoint, VkPipelineLayout layout,
@@ -416,16 +473,35 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        // Fast path: Try to get existing entry with read lock
+        std::shared_ptr<CommandBufferStateEntry> entry;
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it != _states.end())
+                entry = it->second;
+        }
+
+        // Slow path: Create new entry if needed
+        if (!entry)
+        {
+            std::unique_lock mapLock(_statesMapMutex);
+            auto& entryRef = _states[cmd];
+            if (!entryRef)
+                entryRef = std::make_shared<CommandBufferStateEntry>();
+            entry = entryRef;
+        }
+
+        // Now lock only THIS command buffer's state
+        std::scoped_lock stateLock(entry->Mutex);
+        if (!entry->State)
+            entry->State = std::make_shared<CommandBufferState>();
 
         auto idx = ToIndex(bindPoint);
         if (!idx.has_value())
-            return; // Unsupported bind point - ignore
+            return;
 
-        auto& bp = statePtr->BP[static_cast<uint32_t>(*idx)];
+        auto& bp = entry->State->BP[static_cast<uint32_t>(*idx)];
         bp.CurrentPipelineLayout = layout;
 
         // Record the bind call verbatim
@@ -443,7 +519,6 @@ class CommandBufferStateTracker
             }
             else
             {
-                // Invalid: non-zero count but null pointer - log and don't record this bind
                 LOG_ERROR("vkCmdBindDescriptorSets called with descriptorSetCount={} but pDescriptorSets=nullptr",
                           descriptorSetCount);
                 return;
@@ -463,13 +538,11 @@ class CommandBufferStateTracker
             }
             else
             {
-                // Invalid: non-zero count but null pointer - log and don't record this bind
                 LOG_ERROR("vkCmdBindDescriptorSets called with dynamicOffsetCount={} but pDynamicOffsets=nullptr",
                           dynamicOffsetCount);
                 return;
             }
         }
-        // Note: zero count with non-null pointer is benign per Vulkan spec - pointer is ignored
 
         uint32_t bindCallIndex = static_cast<uint32_t>(bp.DescriptorBindCalls.size());
         bp.DescriptorBindCalls.push_back(std::move(bindCall));
@@ -483,7 +556,7 @@ class CommandBufferStateTracker
 
             auto& binding = bp.Sets[setIdx];
             binding.Bound = true;
-            binding.Set = pDescriptorSets[i]; // Safe now - we validated pDescriptorSets above
+            binding.Set = pDescriptorSets[i];
             binding.BoundWithLayout = layout;
             binding.BindCallIndex = bindCallIndex;
         }
@@ -495,46 +568,38 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
         auto idx = ToIndex(bindPoint);
         if (!idx.has_value())
-            return; // Unsupported bind point - ignore
+            return;
 
-        // Update the current layout for this bind point (for descriptor set tracking)
-        auto& bp = statePtr->BP[static_cast<uint32_t>(*idx)];
+        auto& bp = entry->State->BP[static_cast<uint32_t>(*idx)];
         bp.CurrentPipelineLayout = layout;
 
-        // Store push constant in global timeline (NOT per-bind-point)
-        // Push constants affect the command buffer state globally, keyed by (layout, stages, range)
-        PushConstantEntry entry;
-        entry.Layout = layout;
-        entry.Stages = stageFlags;
-        entry.Offset = offset;
-        entry.Size = size;
+        PushConstantEntry pushEntry;
+        pushEntry.Layout = layout;
+        pushEntry.Stages = stageFlags;
+        pushEntry.Offset = offset;
+        pushEntry.Size = size;
 
-        // Copy data to Data[0..size) - the offset is only used during replay
-        // Defensive: check pValues is non-null when size > 0
         if (size > 0 && pValues && size <= kMaxPushConstantBytes)
         {
-            std::memcpy(&entry.Data[0], pValues, size);
+            std::memcpy(&pushEntry.Data[0], pValues, size);
         }
         else if (size > kMaxPushConstantBytes && pValues)
         {
-            // Clamp to maximum size
-            std::memcpy(&entry.Data[0], pValues, kMaxPushConstantBytes);
-            entry.Size = kMaxPushConstantBytes;
+            std::memcpy(&pushEntry.Data[0], pValues, kMaxPushConstantBytes);
+            pushEntry.Size = kMaxPushConstantBytes;
         }
         else if (size > 0 && !pValues)
         {
             LOG_ERROR("vkCmdPushConstants called with size={} but pValues=nullptr", size);
-            return; // Don't store invalid entry
+            return;
         }
 
-        statePtr->PushConstantHistory.push_back(entry);
+        entry->State->PushConstantHistory.push_back(pushEntry);
     }
 
     void OnSetViewport(VkCommandBuffer cmd, uint32_t first, uint32_t count, const VkViewport* pViewports)
@@ -542,25 +607,22 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        // Defensive: validate pointer when count > 0
         if (count > 0 && !pViewports)
         {
             LOG_ERROR("vkCmdSetViewport called with count={} but pViewports=nullptr", count);
             return;
         }
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
         for (uint32_t i = 0; i < count; ++i)
         {
             uint32_t idx = first + i;
             if (idx < kMaxViewports)
             {
-                statePtr->Dyn.Viewports[idx] = pViewports[i];
-                statePtr->Dyn.ViewportValidMask.set(idx);
+                entry->State->Dyn.Viewports[idx] = pViewports[i];
+                entry->State->Dyn.ViewportValidMask.set(idx);
             }
         }
     }
@@ -570,25 +632,22 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        // Defensive: validate pointer when count > 0
         if (count > 0 && !pScissors)
         {
             LOG_ERROR("vkCmdSetScissor called with count={} but pScissors=nullptr", count);
             return;
         }
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
         for (uint32_t i = 0; i < count; ++i)
         {
             uint32_t idx = first + i;
             if (idx < kMaxScissors)
             {
-                statePtr->Dyn.Scissors[idx] = pScissors[i];
-                statePtr->Dyn.ScissorValidMask.set(idx);
+                entry->State->Dyn.Scissors[idx] = pScissors[i];
+                entry->State->Dyn.ScissorValidMask.set(idx);
             }
         }
     }
@@ -599,7 +658,6 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        // Defensive: validate pointers when count > 0
         if (count > 0 && (!pBuffers || !pOffsets))
         {
             LOG_ERROR("vkCmdBindVertexBuffers called with count={} but pBuffers={} or pOffsets={}", count,
@@ -607,19 +665,17 @@ class CommandBufferStateTracker
             return;
         }
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
         for (uint32_t i = 0; i < count; ++i)
         {
             uint32_t idx = first + i;
             if (idx < kMaxVertexBuffers)
             {
-                statePtr->VI.Buffers[idx] = pBuffers[i];
-                statePtr->VI.Offsets[idx] = pOffsets[i];
-                statePtr->VI.BufferValid.set(idx);
+                entry->State->VI.Buffers[idx] = pBuffers[i];
+                entry->State->VI.Offsets[idx] = pOffsets[i];
+                entry->State->VI.BufferValid.set(idx);
             }
         }
     }
@@ -629,15 +685,13 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
-        statePtr->VI.IndexBufferValid = true;
-        statePtr->VI.IndexBuffer = buffer;
-        statePtr->VI.IndexOffset = offset;
-        statePtr->VI.IndexType = indexType;
+        entry->State->VI.IndexBufferValid = true;
+        entry->State->VI.IndexBuffer = buffer;
+        entry->State->VI.IndexOffset = offset;
+        entry->State->VI.IndexType = indexType;
     }
 
     void OnPipelineBarrier(VkCommandBuffer cmd, VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask,
@@ -650,16 +704,13 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
-        // Track image layout transitions
         for (uint32_t i = 0; i < imageMemoryBarrierCount; ++i)
         {
             const auto& barrier = pImageMemoryBarriers[i];
-            statePtr->ImageLayouts[barrier.image] = barrier.newLayout;
+            entry->State->ImageLayouts[barrier.image] = barrier.newLayout;
         }
 #endif
     }
@@ -669,13 +720,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
-        statePtr->Dyn.CullMode = cullMode;
-        statePtr->Dyn.CullModeSet = true;
+        entry->State->Dyn.CullMode = cullMode;
+        entry->State->Dyn.CullModeSet = true;
     }
 
     void OnSetFrontFace(VkCommandBuffer cmd, VkFrontFace frontFace)
@@ -683,13 +732,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
-        statePtr->Dyn.FrontFace = frontFace;
-        statePtr->Dyn.FrontFaceSet = true;
+        entry->State->Dyn.FrontFace = frontFace;
+        entry->State->Dyn.FrontFaceSet = true;
     }
 
     void OnSetPrimitiveTopology(VkCommandBuffer cmd, VkPrimitiveTopology primitiveTopology)
@@ -697,13 +744,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
-        statePtr->Dyn.PrimitiveTopology = primitiveTopology;
-        statePtr->Dyn.PrimitiveTopologySet = true;
+        entry->State->Dyn.PrimitiveTopology = primitiveTopology;
+        entry->State->Dyn.PrimitiveTopologySet = true;
     }
 
     void OnSetDepthTestEnable(VkCommandBuffer cmd, VkBool32 depthTestEnable)
@@ -712,13 +757,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
 
-        statePtr->Dyn.DepthTestEnable = depthTestEnable;
-        statePtr->Dyn.DepthTestEnableSet = true;
+        entry->State->Dyn.DepthTestEnable = depthTestEnable;
+        entry->State->Dyn.DepthTestEnableSet = true;
 #endif
     }
 
@@ -728,12 +771,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->Dyn.DepthWriteEnable = depthWriteEnable;
-        statePtr->Dyn.DepthWriteEnableSet = true;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->Dyn.DepthWriteEnable = depthWriteEnable;
+        entry->State->Dyn.DepthWriteEnableSet = true;
 #endif
     }
 
@@ -743,12 +785,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->Dyn.DepthCompareOp = depthCompareOp;
-        statePtr->Dyn.DepthCompareOpSet = true;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->Dyn.DepthCompareOp = depthCompareOp;
+        entry->State->Dyn.DepthCompareOpSet = true;
 #endif
     }
 
@@ -758,12 +799,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->Dyn.DepthBoundsTestEnable = depthBoundsTestEnable;
-        statePtr->Dyn.DepthBoundsTestEnableSet = true;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->Dyn.DepthBoundsTestEnable = depthBoundsTestEnable;
+        entry->State->Dyn.DepthBoundsTestEnableSet = true;
 #endif
     }
 
@@ -773,12 +813,11 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->Dyn.StencilTestEnable = stencilTestEnable;
-        statePtr->Dyn.StencilTestEnableSet = true;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->Dyn.StencilTestEnable = stencilTestEnable;
+        entry->State->Dyn.StencilTestEnableSet = true;
 #endif
     }
 
@@ -789,16 +828,15 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->Dyn.StencilOpFaceMask = faceMask;
-        statePtr->Dyn.StencilFailOp = failOp;
-        statePtr->Dyn.StencilPassOp = passOp;
-        statePtr->Dyn.StencilDepthFailOp = depthFailOp;
-        statePtr->Dyn.StencilCompareOp = compareOp;
-        statePtr->Dyn.StencilOpSet = true;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->Dyn.StencilOpFaceMask = faceMask;
+        entry->State->Dyn.StencilFailOp = failOp;
+        entry->State->Dyn.StencilPassOp = passOp;
+        entry->State->Dyn.StencilDepthFailOp = depthFailOp;
+        entry->State->Dyn.StencilCompareOp = compareOp;
+        entry->State->Dyn.StencilOpSet = true;
 #endif
     }
 
@@ -809,13 +847,12 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->InRenderPass = true;
-        statePtr->ActiveRenderPass = pRenderPassBegin ? pRenderPassBegin->renderPass : VK_NULL_HANDLE;
-        statePtr->ActiveFramebuffer = pRenderPassBegin ? pRenderPassBegin->framebuffer : VK_NULL_HANDLE;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->InRenderPass = true;
+        entry->State->ActiveRenderPass = pRenderPassBegin ? pRenderPassBegin->renderPass : VK_NULL_HANDLE;
+        entry->State->ActiveFramebuffer = pRenderPassBegin ? pRenderPassBegin->framebuffer : VK_NULL_HANDLE;
 #endif
     }
 
@@ -825,29 +862,22 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
-        auto& statePtr = _states[cmd];
-        if (!statePtr)
-            statePtr = std::make_shared<CommandBufferState>();
-        statePtr->InRenderPass = false;
+        auto entry = GetOrCreateEntry(cmd, true);
+        std::scoped_lock stateLock(entry->Mutex);
+
+        entry->State->InRenderPass = false;
 #endif
     }
 
     void OnCommandBufferDestroyed(VkCommandBuffer cmd)
     {
-        if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
-            return;
-
-        std::scoped_lock lock(_mtx);
+        std::unique_lock lock(_statesMapMutex);
         _states.erase(cmd);
     }
 
     void OnFreeCommandBuffers(VkCommandPool pool, uint32_t count, const VkCommandBuffer* pCommandBuffers)
     {
-        if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
-            return;
-
-        std::scoped_lock lock(_mtx);
+        std::unique_lock lock(_statesMapMutex);
         for (uint32_t i = 0; i < count; ++i)
         {
             _states.erase(pCommandBuffers[i]);
@@ -863,7 +893,8 @@ class CommandBufferStateTracker
         if (_state->currentFeature == nullptr || !_state->currentFeature->IsWithDx12())
             return;
 
-        std::scoped_lock lock(_mtx);
+        std::unique_lock poolLock(_poolMetadataMutex);
+        std::unique_lock mapLock(_statesMapMutex);
 
         // Remove all command buffers allocated from this pool
         for (auto it = _cmdBufferToPool.begin(); it != _cmdBufferToPool.end();)
@@ -993,7 +1024,7 @@ class CommandBufferStateTracker
 
     std::optional<uint32_t> GetCommandBufferQueueFamily(VkCommandBuffer cmd) const
     {
-        std::scoped_lock lock(_mtx);
+        std::shared_lock mapLock(_statesMapMutex);
 
         auto poolIt = _cmdBufferToPool.find(cmd);
         if (poolIt == _cmdBufferToPool.end())
@@ -1002,6 +1033,7 @@ class CommandBufferStateTracker
             return std::nullopt;
         }
 
+        std::shared_lock poolLock(_poolMetadataMutex);
         auto familyIt = _poolToQueueFamily.find(poolIt->second);
         if (familyIt == _poolToQueueFamily.end())
         {
@@ -1333,21 +1365,35 @@ class CommandBufferStateTracker
 #endif
     }
 
+    bool HasFunctionTable() const noexcept { return _hasCachedFns; }
+
     bool TryGetSnapshot(VkCommandBuffer cmd, CommandBufferState& out) const
     {
-        std::scoped_lock lock(_mtx);
-        auto it = _states.find(cmd);
-        if (it == _states.end() || !it->second)
-            return false;
-
-        auto poolIt = _cmdBufferToPool.find(cmd);
-        if (poolIt == _cmdBufferToPool.end())
+        // Get entry with read lock
+        std::shared_ptr<CommandBufferStateEntry> entry;
         {
-            LOG_WARN("Command buffer {:p} not tracked in any pool", (void*) cmd);
-            return false;
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it == _states.end())
+                return false;
+            entry = it->second;
         }
 
-        VkCommandPool pool = poolIt->second;
+        if (!entry)
+            return false;
+
+        // Get pool info
+        VkCommandPool pool = VK_NULL_HANDLE;
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto poolIt = _cmdBufferToPool.find(cmd);
+            if (poolIt == _cmdBufferToPool.end())
+            {
+                LOG_WARN("Command buffer {:p} not tracked in any pool", (void*) cmd);
+                return false;
+            }
+            pool = poolIt->second;
+        }
 
         // Lock-free atomic read
         std::shared_lock poolLock(_poolMetadataMutex);
@@ -1361,55 +1407,64 @@ class CommandBufferStateTracker
         uint64_t currentPoolEpoch = epochIt->second->load(std::memory_order_acquire);
         poolLock.unlock();
 
-        if (it->second->BeginEpoch < currentPoolEpoch)
+        // Lock THIS command buffer's state for snapshot
+        std::scoped_lock stateLock(entry->Mutex);
+        if (!entry->State)
+            return false;
+
+        if (entry->State->BeginEpoch < currentPoolEpoch)
         {
             LOG_WARN("Command buffer {:p} has stale state (epoch {} < pool {:X} epoch {})", (void*) cmd,
-                     it->second->BeginEpoch, (size_t) pool, currentPoolEpoch);
+                     entry->State->BeginEpoch, (size_t) pool, currentPoolEpoch);
             return false;
         }
 
-        out = *it->second;
+        out = *entry->State;
         return true;
     }
-
-    bool HasFunctionTable() const { return _hasCachedFns; }
 
     bool CaptureAndReplay(VkCommandBuffer srcCmd, VkCommandBuffer dstCmd, const VulkanCmdFns& fns,
                           const ReplayParams& params) const
     {
         CommandBufferState snapshot;
 
-        // Capture state from source command buffer (deep copy under lock)
+        // Capture state from source command buffer
         {
-            std::scoped_lock lock(_mtx);
-
-            auto it = _states.find(srcCmd);
-
-            if (it == _states.end())
+            // Get entry with read lock
+            std::shared_ptr<CommandBufferStateEntry> entry;
             {
-                LOG_WARN("Can't found captured state for command buffer {:p}", (void*) srcCmd);
-                return false;
+                std::shared_lock mapLock(_statesMapMutex);
+                auto it = _states.find(srcCmd);
+                if (it == _states.end())
+                {
+                    LOG_WARN("Can't found captured state for command buffer {:p}", (void*) srcCmd);
+                    return false;
+                }
+                entry = it->second;
             }
 
-            if (!it->second)
+            if (!entry)
             {
                 LOG_WARN("Captured state is empty for command buffer {:p}", (void*) srcCmd);
                 return false;
             }
 
-            // Check if this command buffer is tracked in a pool
-            auto poolIt = _cmdBufferToPool.find(srcCmd);
-            if (poolIt == _cmdBufferToPool.end())
+            // Get pool info
+            VkCommandPool pool = VK_NULL_HANDLE;
             {
-                LOG_WARN("Command buffer {:p} not tracked in any pool (allocation hook missed?). "
-                         "Cannot validate epoch - refusing replay for safety.",
-                         (void*) srcCmd);
-                return false;
+                std::shared_lock mapLock(_statesMapMutex);
+                auto poolIt = _cmdBufferToPool.find(srcCmd);
+                if (poolIt == _cmdBufferToPool.end())
+                {
+                    LOG_WARN("Command buffer {:p} not tracked in any pool (allocation hook missed?). "
+                             "Cannot validate epoch - refusing replay for safety.",
+                             (void*) srcCmd);
+                    return false;
+                }
+                pool = poolIt->second;
             }
 
-            // Get the current epoch for this command buffer's pool - LOCK-FREE ATOMIC READ
-            VkCommandPool pool = poolIt->second;
-
+            // Lock-free atomic read
             std::shared_lock poolLock(_poolMetadataMutex);
             auto epochIt = _poolEpochs.find(pool);
             if (epochIt == _poolEpochs.end())
@@ -1422,18 +1477,25 @@ class CommandBufferStateTracker
             uint64_t currentPoolEpoch = epochIt->second->load(std::memory_order_acquire);
             poolLock.unlock();
 
-            // Check if this command buffer's state is stale (invalidated by pool reset)
-            if (it->second->BeginEpoch < currentPoolEpoch)
+            // Lock THIS command buffer's state for deep copy
+            std::scoped_lock stateLock(entry->Mutex);
+            if (!entry->State)
+            {
+                LOG_WARN("Captured state is empty for command buffer {:p}", (void*) srcCmd);
+                return false;
+            }
+
+            if (entry->State->BeginEpoch < currentPoolEpoch)
             {
                 LOG_WARN("Command buffer {:p} has stale state (epoch {} < pool {:X} epoch {}), refusing replay. "
                          "This command buffer was invalidated by vkResetCommandPool and must not be used until "
                          "vkBeginCommandBuffer is called.",
-                         (void*) srcCmd, it->second->BeginEpoch, (size_t) pool, currentPoolEpoch);
+                         (void*) srcCmd, entry->State->BeginEpoch, (size_t) pool, currentPoolEpoch);
                 return false;
             }
 
             // Deep copy the state - now a true immutable snapshot
-            snapshot = *it->second;
+            snapshot = *entry->State;
         }
 
         // Replay to destination (no lock needed - working with copied snapshot)
@@ -1596,10 +1658,32 @@ class CommandBufferStateTracker
         return true;
     }
 
-    mutable std::shared_mutex _mtx;
-    mutable std::shared_mutex _poolMetadataMutex; // Separate lock for pool metadata
+    std::shared_ptr<CommandBufferStateEntry> GetOrCreateEntry(VkCommandBuffer cmd, bool createState = true)
+    {
+        {
+            std::shared_lock mapLock(_statesMapMutex);
+            auto it = _states.find(cmd);
+            if (it != _states.end())
+                return it->second;
+        }
 
-    std::unordered_map<VkCommandBuffer, std::shared_ptr<CommandBufferState>> _states;
+        std::unique_lock mapLock(_statesMapMutex);
+        auto it = _states.find(cmd);
+        if (it != _states.end())
+            return it->second;
+
+        auto entry = std::make_shared<CommandBufferStateEntry>();
+        if (createState)
+            entry->State = std::make_shared<CommandBufferState>();
+
+        _states[cmd] = entry;
+        return entry;
+    }
+
+    mutable std::shared_mutex _poolMetadataMutex; // Separate lock for pool metadata
+    mutable std::shared_mutex _statesMapMutex;    // Only for map structure modifications
+
+    std::unordered_map<VkCommandBuffer, std::shared_ptr<CommandBufferStateEntry>> _states;
 
     VulkanCmdFns _cachedFns {};
     bool _hasCachedFns = false;
