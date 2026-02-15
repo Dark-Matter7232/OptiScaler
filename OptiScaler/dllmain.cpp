@@ -1306,6 +1306,12 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
         state->detectedQuirks.push_back("Disable Resize Skip");
     }
 
+    if (quirks & GameQuirk::SpoofRegistry)
+    {
+        spdlog::info("Quirk: Spoof Registry");
+        state->detectedQuirks.push_back("Spoof Registry");
+    }
+
     return;
 }
 
@@ -1457,6 +1463,11 @@ static void CheckQuirks()
     if (quirks & GameQuirk::DisableResizeSkip && !Config::Instance()->FGXeFGSkipResizeBuffers.has_value())
     {
         Config::Instance()->FGXeFGSkipResizeBuffers.set_volatile_value(false);
+    }
+
+    if (quirks & GameQuirk::SpoofRegistry && !Config::Instance()->SpoofRegistry.has_value())
+    {
+        Config::Instance()->SpoofRegistry.set_volatile_value(true);
     }
 
     // For Luma, we assume if Luma addon in game folder it's used

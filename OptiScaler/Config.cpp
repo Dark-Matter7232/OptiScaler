@@ -583,6 +583,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             TargetVendorId.set_from_config(readUInt("Spoofing", "TargetVendorId"));
             TargetDeviceId.set_from_config(readUInt("Spoofing", "TargetDeviceId"));
             UESpoofIntelAtomics64.set_from_config(readBool("Spoofing", "UEIntelAtomics"));
+            SpoofRegistry.set_from_config(readBool("Spoofing", "Registry"));
         }
 
         // Inputs
@@ -1239,6 +1240,7 @@ bool Config::SaveIni()
                      GetIntValue(Instance()->TargetVendorId.value_for_config(), true).c_str());
         ini.SetValue("Spoofing", "TargetDeviceId",
                      GetIntValue(Instance()->TargetDeviceId.value_for_config(), true).c_str());
+        ini.SetValue("Spoofing", "Registry", GetBoolValue(Instance()->SpoofRegistry.value_for_config()).c_str());
     }
 
     // Plugins
