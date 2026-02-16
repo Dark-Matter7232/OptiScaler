@@ -370,7 +370,7 @@ static void hookAdvapi32()
     o_RegEnumValueW = reinterpret_cast<PFN_RegEnumValueW>(DetourFindFunction("Advapi32.dll", "RegEnumValueW"));
     o_RegCloseKey = reinterpret_cast<PFN_RegCloseKey>(DetourFindFunction("Advapi32.dll", "RegCloseKey"));
 
-    if (if (Config::Instance()->SpoofHAGS.value_or_default() || Config::Instance()->SpoofRegistry.value_or_default())
+    if (Config::Instance()->SpoofHAGS.value_or_default() || Config::Instance()->SpoofRegistry.value_or_default())
     {
         o_RegQueryValueExW =
             reinterpret_cast<PFN_RegQueryValueExW>(DetourFindFunction("Advapi32.dll", "RegQueryValueExW"));
