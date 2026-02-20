@@ -3193,6 +3193,18 @@ bool MenuCommon::RenderMenu()
 
                 constexpr auto fgOutputOptionsCount = std::size(fgOutputOptions);
 
+                // Unsupported FG input selected
+                if (disabledMaskInput[(uint32_t) state.activeFgInput] && state.activeFgInput == config->FGInput)
+                {
+                    config->FGInput = FGInput::NoFG;
+                }
+
+                // Unsupported FG output selected
+                if (disabledMaskOutput[(uint32_t) state.activeFgOutput] && state.activeFgOutput == config->FGOutput)
+                {
+                    config->FGOutput = FGOutput::NoFG;
+                }
+
                 if (!config->FGOutput.has_value())
                     config->FGOutput = config->FGOutput.value_or_default(); // need to have a value before combo
 
