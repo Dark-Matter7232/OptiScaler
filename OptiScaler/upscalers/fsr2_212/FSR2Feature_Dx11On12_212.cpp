@@ -376,6 +376,8 @@ bool FSR2FeatureDx11on12_212::Evaluate(ID3D11DeviceContext* InDeviceContext, NVS
             }
         }
 
+        state = 2;
+
     } while (false);
 
     if (state > 0)
