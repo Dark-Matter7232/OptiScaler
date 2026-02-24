@@ -1116,6 +1116,7 @@ void MenuCommon::AddDx12Backends(std::string* code, std::string* name)
 void MenuCommon::AddVulkanBackends(std::string* code, std::string* name)
 {
     std::string selectedUpscalerName = "";
+    std::string fsr3xName = Config::Instance()->Fsr4Update.value_or_default() ? "FSR 3.X/4 w/Dx12" : "FSR 3.X w/Dx12";
 
     if (State::Instance().newBackend == "fsr21" || (State::Instance().newBackend == "" && *code == "fsr21"))
         selectedUpscalerName = "FSR 2.1.2";
@@ -1127,7 +1128,7 @@ void MenuCommon::AddVulkanBackends(std::string* code, std::string* name)
              (State::Instance().newBackend == "dlss" || (State::Instance().newBackend == "" && *code == "dlss")))
         selectedUpscalerName = "DLSS";
     else if (State::Instance().newBackend == "fsr31_12" || (State::Instance().newBackend == "" && *code == "fsr31_12"))
-        selectedUpscalerName = "FSR 3.X w/Dx12";
+        selectedUpscalerName = fsr3xName;
     else if (State::Instance().newBackend == "fsr21_12" || (State::Instance().newBackend == "" && *code == "fsr21_12"))
         selectedUpscalerName = "FSR 2.1.2 w/Dx12";
     else
