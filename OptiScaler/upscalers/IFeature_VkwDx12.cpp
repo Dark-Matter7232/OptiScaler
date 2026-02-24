@@ -225,7 +225,7 @@ static DXGI_FORMAT VkFormatToDxgiFormat(VkFormat vkFormat)
     case VK_FORMAT_D24_UNORM_S8_UINT:
         return DXGI_FORMAT_D24_UNORM_S8_UINT;
     case VK_FORMAT_D32_SFLOAT_S8_UINT:
-        return DXGI_FORMAT_D32_FLOAT;
+        return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     case VK_FORMAT_X8_D24_UNORM_PACK32:
         return DXGI_FORMAT_D24_UNORM_S8_UINT; // Closest match
 

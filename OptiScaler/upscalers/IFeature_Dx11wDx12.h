@@ -39,7 +39,7 @@ class IFeature_Dx11wDx12 : public virtual IFeature_Dx11
     ID3D11Device5* Dx11Device = nullptr;
     ID3D11DeviceContext4* Dx11DeviceContext = nullptr;
 
-    D3D12_COMMAND_LIST_TYPE Dx12CommandListType = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+    D3D12_COMMAND_LIST_TYPE Dx12CommandListType = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
     ID3D12CommandQueue* Dx12CommandQueue = nullptr;
     ID3D12CommandAllocator* Dx12CommandAllocator[2] = { nullptr, nullptr };
