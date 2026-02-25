@@ -226,27 +226,10 @@ struct AmdExtFfxApi : public IAmdExtFfxApi
         // check after ML FG update this should be disabled!
         auto effectType = FfxApiProxy::GetType(reinterpret_cast<ExternalProviderData*>(pData)->descType);
 
-        switch (effectType)
-        {
-        case FFXStructType::Upscaling:
-            LOG_INFO("Trying to update upscaling");
-            break;
-
-        case FFXStructType::FG:
-            LOG_INFO("Trying to update FG");
-            break;
-
-        case FFXStructType::SwapchainDX12:
-            LOG_ERROR("Skipping update for DX12 Swapchain");
-            return E_INVALIDARG;
-
-        case FFXStructType::SwapchainVulkan:
-            LOG_ERROR("Skipping update for VK Swapchain");
-            return E_INVALIDARG;
-
-        default:
+        if (effectType >= FFXStructType::Unknown)
             LOG_INFO("Trying to update something???");
-        }
+        else
+            LOG_INFO("Trying to update: {}", magic_enum::enum_name(effectType));
 
         if (o_UpdateFfxApiProvider == nullptr)
         {
@@ -303,7 +286,8 @@ struct AmdExtFfxApi : public IAmdExtFfxApi
             }
         }
 
-        if ((effectType == FFXStructType::FG || effectType == FFXStructType::Upscaling) &&
+        if ((effectType == FFXStructType::FG || effectType == FFXStructType::Upscaling ||
+             effectType == FFXStructType::SwapchainDX12) &&
             o_UpdateFfxApiProviderEx != nullptr)
         {
             State::DisableChecks(1);
