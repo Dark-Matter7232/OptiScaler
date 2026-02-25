@@ -28,7 +28,7 @@
 #undef FFX_API_CONFIGURE_FG_SWAPCHAIN_KEY_FRAMEPACINGTUNING
 
 static HMODULE moduleAmdxc64 = nullptr;
-static HMODULE fsr4Module = nullptr;
+static HMODULE moduleAmdxcffx64 = nullptr;
 
 static AmdExtD3DDevice8* amdExtD3DDevice8 = nullptr;
 static AmdExtD3DShaderIntrinsics* amdExtD3DShaderIntrinsics = nullptr;
@@ -233,21 +233,21 @@ struct AmdExtFfxApi : public IAmdExtFfxApi
 
         if (o_UpdateFfxApiProvider == nullptr)
         {
-            fsr4Module = NtdllProxy::LoadLibraryExW_Ldr(L"amdxcffx64.dll", NULL, 0);
+            moduleAmdxcffx64 = NtdllProxy::LoadLibraryExW_Ldr(L"amdxcffx64.dll", NULL, 0);
 
-            if (fsr4Module == nullptr)
+            if (moduleAmdxcffx64 == nullptr)
             {
                 auto storePath = GetDriverStore();
 
                 for (size_t i = 0; i < storePath.size(); i++)
                 {
-                    if (fsr4Module == nullptr)
+                    if (moduleAmdxcffx64 == nullptr)
                     {
                         auto dllPath = storePath[i] / L"amdxcffx64.dll";
                         LOG_DEBUG("Trying to load: {}", wstring_to_string(dllPath.c_str()));
-                        fsr4Module = NtdllProxy::LoadLibraryExW_Ldr(dllPath.c_str(), NULL, 0);
+                        moduleAmdxcffx64 = NtdllProxy::LoadLibraryExW_Ldr(dllPath.c_str(), NULL, 0);
 
-                        if (fsr4Module != nullptr)
+                        if (moduleAmdxcffx64 != nullptr)
                         {
                             LOG_INFO(L"amdxcffx64 loaded from {}", dllPath.wstring());
                             break;
@@ -260,7 +260,7 @@ struct AmdExtFfxApi : public IAmdExtFfxApi
                 LOG_INFO("amdxcffx64 loaded from game folder");
             }
 
-            if (fsr4Module == nullptr)
+            if (moduleAmdxcffx64 == nullptr)
             {
                 LOG_ERROR("Failed to load amdxcffx64.dll");
                 return E_NOINTERFACE;
@@ -269,15 +269,16 @@ struct AmdExtFfxApi : public IAmdExtFfxApi
             auto sdk2upscalingModule = KernelBaseProxy::GetModuleHandleA_()("amd_fidelityfx_upscaler_dx12.dll");
             constexpr bool unhookOld = false;
 
-            if (sdk2upscalingModule != nullptr)
-                FSR4ModelSelection::Hook(sdk2upscalingModule, unhookOld);
-            else
-                FSR4ModelSelection::Hook(fsr4Module, unhookOld);
+            if (sdk2upscalingModule)
+                FSR4ModelSelection::Hook(sdk2upscalingModule, FSR4Source::SDK);
+
+            if (moduleAmdxcffx64)
+                FSR4ModelSelection::Hook(moduleAmdxcffx64, FSR4Source::DriverDll);
 
             o_UpdateFfxApiProvider =
-                (PFN_UpdateFfxApiProvider) KernelBaseProxy::GetProcAddress_()(fsr4Module, "UpdateFfxApiProvider");
-            o_UpdateFfxApiProviderEx =
-                (PFN_UpdateFfxApiProviderEx) KernelBaseProxy::GetProcAddress_()(fsr4Module, "UpdateFfxApiProviderEx");
+                (PFN_UpdateFfxApiProvider) KernelBaseProxy::GetProcAddress_()(moduleAmdxcffx64, "UpdateFfxApiProvider");
+            o_UpdateFfxApiProviderEx = (PFN_UpdateFfxApiProviderEx) KernelBaseProxy::GetProcAddress_()(
+                moduleAmdxcffx64, "UpdateFfxApiProviderEx");
 
             if (o_UpdateFfxApiProvider == nullptr)
             {
@@ -491,7 +492,7 @@ void InitFSR4Update()
     }
 }
 
-HMODULE GetFSR4Module() { return fsr4Module; }
+HMODULE GetFSR4Module() { return moduleAmdxcffx64; }
 
 HRESULT STDMETHODCALLTYPE hkAmdExtD3DCreateInterface(IUnknown* pOuter, REFIID riid, void** ppvObject)
 {
