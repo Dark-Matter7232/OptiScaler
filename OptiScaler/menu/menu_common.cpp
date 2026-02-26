@@ -1082,7 +1082,7 @@ void MenuCommon::AddDx12Backends(std::string* code, std::string* name)
     std::string selectedUpscalerName = "";
     bool fsr4Possible =
         Config::Instance()->Fsr4Update.value_or_default() || State::Instance().isRunningOnRDNA4.value_or(false);
-    std::string fsr3xName = fsr4Possible ? "FSR 3.X/4 w/Dx12" : "FSR 3.X w/Dx12";
+    std::string fsr3xName = fsr4Possible ? "FSR 3.X/4" : "FSR 3.X";
 
     if (State::Instance().newBackend == "fsr21" || (State::Instance().newBackend == "" && *code == "fsr21"))
         selectedUpscalerName = "FSR 2.1.2";
