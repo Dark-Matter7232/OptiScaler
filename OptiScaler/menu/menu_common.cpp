@@ -3067,14 +3067,7 @@ bool MenuCommon::RenderMenu()
 
                 // OptiFG requirements
                 auto constexpr optiFgIndex = (uint32_t) FGInput::Upscaler;
-
-                // if (!config->OverlayMenu.value_or_default())
-                //{
-                //    disabledMaskInput[optiFgIndex] = true;
-                //    fgInputDesc[optiFgIndex] = "Old overlay menu is unsupported";
-                //}
-                // else if (state.swapchainApi != DX12)
-                if (state.api != DX12)
+                if (state.api == API::DX11 || state.api == API::Vulkan)
                 {
                     disabledMaskInput[optiFgIndex] = true;
                     fgInputDesc[optiFgIndex] = "Unsupported API";
@@ -3164,14 +3157,6 @@ bool MenuCommon::RenderMenu()
                 // Nukem's FG mod requirements
                 auto constexpr nukemsInputIndex = (uint32_t) FGInput::Nukems;
                 auto constexpr nukemsOutputIndex = (uint32_t) FGOutput::Nukems;
-                // if (state.swapchainApi == DX11)
-                //{
-                //     disabledMaskInput[nukemsInputIndex] = true;
-                //     fgInputDesc[nukemsInputIndex] = "Unsupported API";
-                //     disabledMaskOutput[nukemsOutputIndex] = true;
-                //     fgOutputDesc[nukemsOutputIndex] = "Unsupported API";
-                // }
-                // else
                 if (state.isWorkingAsNvngx)
                 {
                     disabledMaskInput[nukemsInputIndex] = true;
@@ -3201,14 +3186,18 @@ bool MenuCommon::RenderMenu()
                 constexpr auto fgOutputOptionsCount = std::size(fgOutputOptions);
 
                 // Unsupported FG input selected
-                if (disabledMaskInput[(uint32_t) state.activeFgInput] && state.activeFgInput == config->FGInput)
+                if (config->FGInput != FGInput::NoFG && disabledMaskInput[(uint32_t) state.activeFgInput] &&
+                    state.activeFgInput == config->FGInput)
                 {
+                    LOG_WARN("Resetting FGInput to NoFG: {}", fgInputDesc[(uint32_t) state.activeFgInput]);
                     config->FGInput = FGInput::NoFG;
                 }
 
                 // Unsupported FG output selected
-                if (disabledMaskOutput[(uint32_t) state.activeFgOutput] && state.activeFgOutput == config->FGOutput)
+                if (config->FGOutput != FGOutput::NoFG && disabledMaskOutput[(uint32_t) state.activeFgOutput] &&
+                    state.activeFgOutput == config->FGOutput)
                 {
+                    LOG_WARN("Resetting FGOutput to NoFG: {}", fgOutputDesc[(uint32_t) state.activeFgOutput]);
                     config->FGOutput = FGOutput::NoFG;
                 }
 
