@@ -15,13 +15,13 @@ class DxgiFactoryHooks
     typedef HRESULT (*PFN_EnumAdapterByLuid)(IDXGIFactory4* This, LUID AdapterLuid, REFIID riid, IUnknown** ppvAdapter);
     typedef HRESULT (*PFN_EnumAdapters1)(IDXGIFactory1* This, UINT Adapter, IUnknown** ppAdapter);
     typedef HRESULT (*PFN_EnumAdapters)(IDXGIFactory* This, UINT Adapter, IUnknown** ppAdapter);
-    typedef HRESULT (*PFN_CreateSwapChain)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+    typedef HRESULT (*PFN_CreateSwapChain)(IDXGIFactory*, IUnknown*, const DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
     typedef HRESULT (*PFN_CreateSwapChainForHwnd)(IDXGIFactory*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
                                                   const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*,
                                                   IDXGISwapChain1**);
     typedef HRESULT (*PFN_CreateSwapChainForCoreWindow)(IDXGIFactory2*, IUnknown* pDevice, IUnknown* pWindow,
-                                                        DXGI_SWAP_CHAIN_DESC1* pDesc, IDXGIOutput* pRestrictToOutput,
-                                                        IDXGISwapChain1** ppSwapChain);
+                                                        const DXGI_SWAP_CHAIN_DESC1* pDesc,
+                                                        IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain);
 
     inline static PFN_EnumAdapterByGpuPreference o_EnumAdapterByGpuPreference = nullptr;
     inline static PFN_EnumAdapterByLuid o_EnumAdapterByLuid = nullptr;
@@ -31,16 +31,16 @@ class DxgiFactoryHooks
     inline static PFN_CreateSwapChainForHwnd o_CreateSwapChainForHwnd = nullptr;
     inline static PFN_CreateSwapChainForCoreWindow o_CreateSwapChainForCoreWindow = nullptr;
 
-    static HRESULT CreateSwapChain(IDXGIFactory* realFactory, IUnknown* pDevice, DXGI_SWAP_CHAIN_DESC* pDesc,
+    static HRESULT CreateSwapChain(IDXGIFactory* realFactory, IUnknown* pDevice, const DXGI_SWAP_CHAIN_DESC* pDesc,
                                    IDXGISwapChain** ppSwapChain);
 
     static HRESULT CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUnknown* pDevice, HWND hWnd,
-                                          DXGI_SWAP_CHAIN_DESC1* pDesc,
-                                          DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
+                                          const DXGI_SWAP_CHAIN_DESC1* pDesc,
+                                          const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
                                           IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain);
 
     static HRESULT CreateSwapChainForCoreWindow(IDXGIFactory2* realFactory, IUnknown* pDevice, IUnknown* pWindow,
-                                                DXGI_SWAP_CHAIN_DESC1* pDesc, IDXGIOutput* pRestrictToOutput,
+                                                const DXGI_SWAP_CHAIN_DESC1* pDesc, IDXGIOutput* pRestrictToOutput,
                                                 IDXGISwapChain1** ppSwapChain);
 
     static HRESULT EnumAdapters(IDXGIFactory* realFactory, UINT Adapter, IDXGIAdapter** ppAdapter);

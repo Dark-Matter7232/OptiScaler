@@ -87,7 +87,7 @@ static void HookToDevice(ID3D11Device* InDevice)
     }
 }
 
-static HRESULT hkD3D11On12CreateDevice(IUnknown* pDevice, UINT Flags, D3D_FEATURE_LEVEL* pFeatureLevels,
+static HRESULT hkD3D11On12CreateDevice(IUnknown* pDevice, UINT Flags, const D3D_FEATURE_LEVEL* pFeatureLevels,
                                        UINT FeatureLevels, IUnknown** ppCommandQueues, UINT NumQueues, UINT NodeMask,
                                        ID3D11Device** ppDevice, ID3D11DeviceContext** ppImmediateContext,
                                        D3D_FEATURE_LEVEL* pChosenFeatureLevel)
@@ -108,7 +108,9 @@ static HRESULT hkD3D11On12CreateDevice(IUnknown* pDevice, UINT Flags, D3D_FEATUR
     {
         LOG_INFO("Replaced RTSS CommandQueue with correct one {0:X} -> {1:X}", (UINT64) *ppCommandQueues,
                  (UINT64) State::Instance().currentCommandQueue);
+
         *ppCommandQueues = State::Instance().currentCommandQueue;
+
         rtss = true;
     }
 
@@ -130,7 +132,7 @@ static HRESULT hkD3D11On12CreateDevice(IUnknown* pDevice, UINT Flags, D3D_FEATUR
 }
 
 static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags,
-                                   CONST D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels, UINT SDKVersion,
+                                   const D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels, UINT SDKVersion,
                                    ID3D11Device** ppDevice, D3D_FEATURE_LEVEL* pFeatureLevel,
                                    ID3D11DeviceContext** ppImmediateContext)
 {
@@ -233,8 +235,8 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
 }
 
 static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software,
-                                               UINT Flags, CONST D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels,
-                                               UINT SDKVersion, DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+                                               UINT Flags, const D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels,
+                                               UINT SDKVersion, const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
                                                IDXGISwapChain** ppSwapChain, ID3D11Device** ppDevice,
                                                D3D_FEATURE_LEVEL* pFeatureLevel,
                                                ID3D11DeviceContext** ppImmediateContext)
@@ -327,9 +329,13 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
         return result;
     }
 
+    DXGI_SWAP_CHAIN_DESC localDesc {};
+
     // For vsync override
     if (pSwapChainDesc != nullptr)
     {
+        memcpy(&localDesc, pSwapChainDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
+
         if (!pSwapChainDesc->Windowed)
         {
             LOG_INFO("Game is creating fullscreen swapchain, disabled V-Sync overrides");
@@ -338,19 +344,19 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
 
         if (Config::Instance()->OverrideVsync.value_or_default())
         {
-            pSwapChainDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-            pSwapChainDesc->Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+            localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            localDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-            if (pSwapChainDesc->BufferCount < 2)
-                pSwapChainDesc->BufferCount = 2;
+            if (localDesc.BufferCount < 2)
+                localDesc.BufferCount = 2;
         }
     }
 
     _skipDx11Create = true;
 
     auto result = o_D3D11CreateDeviceAndSwapChain(pAdapter, DriverType, Software, Flags, pFeatureLevels, FeatureLevels,
-                                                  SDKVersion, pSwapChainDesc, ppSwapChain, ppDevice, pFeatureLevel,
-                                                  ppImmediateContext);
+                                                  SDKVersion, pSwapChainDesc != nullptr ? &localDesc : nullptr,
+                                                  ppSwapChain, ppDevice, pFeatureLevel, ppImmediateContext);
     _skipDx11Create = false;
 
     if (result == S_OK && *ppDevice != nullptr && State::Instance().currentD3D12Device == nullptr)

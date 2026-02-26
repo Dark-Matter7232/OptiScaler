@@ -7,15 +7,15 @@ class DxgiFactoryWrappedCalls
 {
   public:
     static HRESULT CreateSwapChain(IDXGIFactory* realFactory, WrappedIDXGIFactory7* wrappedFactory, IUnknown* pDevice,
-                                   DXGI_SWAP_CHAIN_DESC* pDesc, IDXGISwapChain** ppSwapChain);
+                                   const DXGI_SWAP_CHAIN_DESC* pDesc, IDXGISwapChain** ppSwapChain);
 
     static HRESULT CreateSwapChainForHwnd(IDXGIFactory2* realFactory, WrappedIDXGIFactory7* wrappedFactory,
-                                          IUnknown* pDevice, HWND hWnd, DXGI_SWAP_CHAIN_DESC1* pDesc,
-                                          DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
+                                          IUnknown* pDevice, HWND hWnd, const DXGI_SWAP_CHAIN_DESC1* pDesc,
+                                          const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
                                           IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain);
 
     static HRESULT CreateSwapChainForCoreWindow(IDXGIFactory2* realFactory, IUnknown* pDevice, IUnknown* pWindow,
-                                                DXGI_SWAP_CHAIN_DESC1* pDesc, IDXGIOutput* pRestrictToOutput,
+                                                const DXGI_SWAP_CHAIN_DESC1* pDesc, IDXGIOutput* pRestrictToOutput,
                                                 IDXGISwapChain1** ppSwapChain);
 
     static HRESULT EnumAdapters(IDXGIFactory* realFactory, UINT Adapter, IDXGIAdapter** ppAdapter);

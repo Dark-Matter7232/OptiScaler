@@ -136,8 +136,8 @@ void DxgiFactoryHooks::HookToFactory(IDXGIFactory* pFactory)
     DetourTransactionCommit();
 }
 
-HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* pDevice, DXGI_SWAP_CHAIN_DESC* pDesc,
-                                          IDXGISwapChain** ppSwapChain)
+HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* pDevice,
+                                          const DXGI_SWAP_CHAIN_DESC* pDesc, IDXGISwapChain** ppSwapChain)
 {
     *ppSwapChain = nullptr;
 
@@ -179,41 +179,29 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
         return res;
     }
 
-    LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, Windowed: {}, SkipWrapping: {}",
-              pDesc->BufferDesc.Width, pDesc->BufferDesc.Height, (UINT) pDesc->BufferDesc.Format, pDesc->BufferCount,
-              pDesc->Flags, (SIZE_T) pDesc->OutputWindow, pDesc->Windowed, _skipFGSwapChainCreation);
+    DXGI_SWAP_CHAIN_DESC localDesc {};
+    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
 
-    LOG_DEBUG("pDesc->BufferCount: {}", pDesc->BufferCount);
-    LOG_DEBUG("pDesc->BufferDesc.Width: {}", pDesc->BufferDesc.Width);
-    LOG_DEBUG("pDesc->BufferDesc.Format: {}", magic_enum::enum_name(pDesc->BufferDesc.Format));
-    LOG_DEBUG("pDesc->BufferDesc.Height: {}", pDesc->BufferDesc.Height);
-    LOG_DEBUG("pDesc->BufferDesc.RefreshRate.Denominator: {}", pDesc->BufferDesc.RefreshRate.Denominator);
-    LOG_DEBUG("pDesc->BufferDesc.RefreshRate.Numerator: {}", pDesc->BufferDesc.RefreshRate.Numerator);
-    LOG_DEBUG("pDesc->BufferDesc.Scaling: {}", magic_enum::enum_name(pDesc->BufferDesc.Scaling));
-    LOG_DEBUG("pDesc->BufferDesc.ScanlineOrdering: {}", magic_enum::enum_name(pDesc->BufferDesc.ScanlineOrdering));
-    LOG_DEBUG("pDesc->Windowed: {}", pDesc->Windowed);
-    LOG_DEBUG("pDesc->SampleDesc.Count: {}", pDesc->SampleDesc.Count);
-    LOG_DEBUG("pDesc->SampleDesc.Quality: {}", pDesc->SampleDesc.Quality);
-    LOG_DEBUG("pDesc->BufferUsage: {}", (UINT) pDesc->BufferUsage);
-    LOG_DEBUG("pDesc->Flags: {}", pDesc->Flags);
-    LOG_DEBUG("pDesc->OutputWindow: {:X}", (UINT64) pDesc->OutputWindow);
-    LOG_DEBUG("pDesc->SwapEffect: {}", magic_enum::enum_name(pDesc->SwapEffect));
+    LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, Windowed: {}, SkipWrapping: {}",
+              localDesc.BufferDesc.Width, localDesc.BufferDesc.Height, (UINT) localDesc.BufferDesc.Format,
+              localDesc.BufferCount, localDesc.Flags, (SIZE_T) localDesc.OutputWindow, localDesc.Windowed,
+              _skipFGSwapChainCreation);
 
     if (State::Instance().activeFgOutput == FGOutput::XeFG &&
         Config::Instance()->FGXeFGForceBorderless.value_or_default())
     {
-        if (!pDesc->Windowed)
+        if (!localDesc.Windowed)
         {
             State::Instance().SCExclusiveFullscreen = true;
-            pDesc->Windowed = true;
+            localDesc.Windowed = true;
         }
 
-        pDesc->Flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-        pDesc->BufferDesc.Scaling = DXGI_MODE_SCALING_STRETCHED;
+        localDesc.Flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+        localDesc.BufferDesc.Scaling = DXGI_MODE_SCALING_STRETCHED;
     }
 
     // For vsync override
-    if (!pDesc->Windowed)
+    if (!localDesc.Windowed)
     {
         LOG_INFO("Game is creating fullscreen swapchain, disabled V-Sync overrides");
         Config::Instance()->OverrideVsync.set_volatile_value(false);
@@ -221,33 +209,34 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
 
     if (Config::Instance()->OverrideVsync.value_or_default())
     {
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        pDesc->Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        localDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-        if (pDesc->BufferCount < 2)
-            pDesc->BufferCount = 2;
+        if (localDesc.BufferCount < 2)
+            localDesc.BufferCount = 2;
     }
 
-    State::Instance().SCAllowTearing = (pDesc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
-    State::Instance().SCLastFlags = pDesc->Flags;
-    State::Instance().realExclusiveFullscreen = !pDesc->Windowed;
+    State::Instance().SCAllowTearing = (localDesc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    State::Instance().SCLastFlags = localDesc.Flags;
+    State::Instance().realExclusiveFullscreen = !localDesc.Windowed;
 
 #ifdef DETAILED_SC_LOGS
-    LOG_TRACE("pDesc->BufferCount: {}", pDesc->BufferCount);
-    LOG_TRACE("pDesc->BufferDesc.Format: {}", magic_enum::enum_name(pDesc->BufferDesc.Format));
-    LOG_TRACE("pDesc->BufferDesc.Height: {}", pDesc->BufferDesc.Height);
-    LOG_TRACE("pDesc->BufferDesc.RefreshRate.Denominator: {}", pDesc->BufferDesc.RefreshRate.Denominator);
-    LOG_TRACE("pDesc->BufferDesc.RefreshRate.Numerator: {}", pDesc->BufferDesc.RefreshRate.Numerator);
-    LOG_TRACE("pDesc->BufferDesc.Scaling: {}", magic_enum::enum_name(pDesc->BufferDesc.Scaling));
-    LOG_TRACE("pDesc->BufferDesc.ScanlineOrdering: {}", magic_enum::enum_name(pDesc->BufferDesc.ScanlineOrdering));
-    LOG_TRACE("pDesc->BufferDesc.Width: {}", pDesc->BufferDesc.Width);
-    LOG_TRACE("pDesc->BufferUsage: {}", pDesc->BufferUsage);
-    LOG_TRACE("pDesc->Flags: {}", pDesc->Flags);
-    LOG_TRACE("pDesc->OutputWindow: {}", (UINT64) pDesc->OutputWindow);
-    LOG_TRACE("pDesc->SampleDesc.Count: {}", pDesc->SampleDesc.Count);
-    LOG_TRACE("pDesc->SampleDesc.Quality: {}", pDesc->SampleDesc.Quality);
-    LOG_TRACE("pDesc->SwapEffect: {}", magic_enum::enum_name(pDesc->SwapEffect));
-    LOG_TRACE("pDesc->Windowed: {}", pDesc->Windowed);
+    LOG_TRACE("localDesc.BufferCount: {}", localDesc.BufferCount);
+    LOG_TRACE("localDesc.BufferDesc.Format: {}", magic_enum::enum_name(localDesc.BufferDesc.Format));
+    LOG_TRACE("localDesc.BufferDesc.Height: {}", localDesc.BufferDesc.Height);
+    LOG_TRACE("localDesc.BufferDesc.RefreshRate.Denominator: {}", localDesc.BufferDesc.RefreshRate.Denominator);
+    LOG_TRACE("localDesc.BufferDesc.RefreshRate.Numerator: {}", localDesc.BufferDesc.RefreshRate.Numerator);
+    LOG_TRACE("localDesc.BufferDesc.Scaling: {}", magic_enum::enum_name(localDesc.BufferDesc.Scaling));
+    LOG_TRACE("localDesc.BufferDesc.ScanlineOrdering: {}",
+              magic_enum::enum_name(localDesc.BufferDesc.ScanlineOrdering));
+    LOG_TRACE("localDesc.BufferDesc.Width: {}", localDesc.BufferDesc.Width);
+    LOG_TRACE("localDesc.BufferUsage: {}", localDesc.BufferUsage);
+    LOG_TRACE("localDesc.Flags: {}", localDesc.Flags);
+    LOG_TRACE("localDesc.OutputWindow: {}", (UINT64) localDesc.OutputWindow);
+    LOG_TRACE("localDesc.SampleDesc.Count: {}", localDesc.SampleDesc.Count);
+    LOG_TRACE("localDesc.SampleDesc.Quality: {}", localDesc.SampleDesc.Quality);
+    LOG_TRACE("localDesc.SwapEffect: {}", magic_enum::enum_name(localDesc.SwapEffect));
+    LOG_TRACE("localDesc.Windowed: {}", localDesc.Windowed);
 #endif //
 
     // Check for SL proxy, get real queue
@@ -283,11 +272,11 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
         if (!_skipFGSwapChainCreation)
         {
             ScopedSkipFGSCCreation skipFGSCCreation {};
-            FGSCResult = FGHooks::CreateSwapChain(realFactory, real, pDesc, ppSwapChain);
+            FGSCResult = FGHooks::CreateSwapChain(realFactory, real, &localDesc, ppSwapChain);
 
             if (FGSCResult == S_OK)
             {
-                State::Instance().currentSwapchainDesc = *pDesc;
+                State::Instance().currentSwapchainDesc = localDesc;
                 return FGSCResult;
             }
         }
@@ -314,7 +303,7 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
 
         {
             ScopedSkipParentWrapping skipParentWrapping {};
-            result = o_CreateSwapChain(realFactory, pDevice, pDesc, ppSwapChain);
+            result = o_CreateSwapChain(realFactory, pDevice, &localDesc, ppSwapChain);
         }
 
         if (!_skipFGSwapChainCreation)
@@ -327,7 +316,7 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
 
         if (result == S_OK)
         {
-            State::Instance().currentSwapchainDesc = *pDesc;
+            State::Instance().currentSwapchainDesc = localDesc;
 
             // Check for SL proxy
             IDXGISwapChain* realSC = nullptr;
@@ -340,14 +329,16 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
             if (!Util::CheckForRealObject(__FUNCTION__, pDevice, (IUnknown**) &realDevice))
                 realDevice = pDevice;
 
-            if (Util::GetProcessWindow() == pDesc->OutputWindow)
+            if (Util::GetProcessWindow() == localDesc.OutputWindow)
             {
-                State::Instance().screenWidth = static_cast<float>(pDesc->BufferDesc.Width);
-                State::Instance().screenHeight = static_cast<float>(pDesc->BufferDesc.Height);
+                State::Instance().screenWidth = static_cast<float>(localDesc.BufferDesc.Width);
+                State::Instance().screenHeight = static_cast<float>(localDesc.BufferDesc.Height);
             }
 
-            LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (UINT64) *ppSwapChain, (UINT64) pDesc->OutputWindow);
-            *ppSwapChain = new WrappedIDXGISwapChain4(realSC, realDevice, pDesc->OutputWindow, pDesc->Flags, false);
+            LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (UINT64) *ppSwapChain,
+                      (UINT64) localDesc.OutputWindow);
+            *ppSwapChain =
+                new WrappedIDXGISwapChain4(realSC, realDevice, localDesc.OutputWindow, localDesc.Flags, false);
 
             // Set as currentSwapchain is FG is disabled
             if (!_skipFGSwapChainCreation)
@@ -368,8 +359,8 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
 }
 
 HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUnknown* pDevice, HWND hWnd,
-                                                 DXGI_SWAP_CHAIN_DESC1* pDesc,
-                                                 DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
+                                                 const DXGI_SWAP_CHAIN_DESC1* pDesc,
+                                                 const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
                                                  IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain)
 {
     *ppSwapChain = nullptr;
@@ -436,28 +427,37 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         return result;
     }
 
-    LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}", pDesc->Width,
-              pDesc->Height, (UINT) pDesc->Format, pDesc->BufferCount, pDesc->Flags, (size_t) hWnd,
-              _skipFGSwapChainCreation);
+    DXGI_SWAP_CHAIN_DESC1 localDesc {};
+    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+
+    LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}",
+              localDesc.Width, localDesc.Height, (UINT) localDesc.Format, localDesc.BufferCount, localDesc.Flags,
+              (size_t) hWnd, _skipFGSwapChainCreation);
 
     if (pFullscreenDesc != nullptr)
         State::Instance().realExclusiveFullscreen = !pFullscreenDesc->Windowed;
 
+    DXGI_SWAP_CHAIN_FULLSCREEN_DESC localFullscreenDesc {};
+
+    if (pFullscreenDesc != nullptr)
+        memcpy(&localFullscreenDesc, pFullscreenDesc, sizeof(DXGI_SWAP_CHAIN_FULLSCREEN_DESC));
+
     if (State::Instance().activeFgOutput == FGOutput::XeFG &&
         Config::Instance()->FGXeFGForceBorderless.value_or_default())
     {
-        if (pFullscreenDesc != nullptr && !pFullscreenDesc->Windowed)
+        if (pFullscreenDesc != nullptr && !localFullscreenDesc.Windowed)
         {
+
             State::Instance().SCExclusiveFullscreen = true;
-            pFullscreenDesc->Windowed = true;
+            localFullscreenDesc.Windowed = true;
         }
 
-        pDesc->Flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-        pDesc->Scaling = DXGI_SCALING_STRETCH;
+        localDesc.Flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+        localDesc.Scaling = DXGI_SCALING_STRETCH;
     }
 
     // For vsync override
-    if (pFullscreenDesc != nullptr && !pFullscreenDesc->Windowed)
+    if (pFullscreenDesc != nullptr && !localFullscreenDesc.Windowed)
     {
         LOG_INFO("Game is creating fullscreen swapchain, disabled V-Sync overrides");
         Config::Instance()->OverrideVsync.set_volatile_value(false);
@@ -465,16 +465,16 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
 
     if (Config::Instance()->OverrideVsync.value_or_default())
     {
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        pDesc->Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        localDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-        if (pDesc->BufferCount < 2)
-            pDesc->BufferCount = 2;
+        if (localDesc.BufferCount < 2)
+            localDesc.BufferCount = 2;
     }
 
-    State::Instance().SCAllowTearing = (pDesc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
-    State::Instance().SCLastFlags = pDesc->Flags;
-    State::Instance().realExclusiveFullscreen = pFullscreenDesc != nullptr && !pFullscreenDesc->Windowed;
+    State::Instance().SCAllowTearing = (localDesc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    State::Instance().SCLastFlags = localDesc.Flags;
+    State::Instance().realExclusiveFullscreen = pFullscreenDesc != nullptr && !localFullscreenDesc.Windowed;
 
     // Check for SL proxy, get real queue
     ID3D12CommandQueue* cq = nullptr;
@@ -482,24 +482,25 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
     HRESULT FGSCResult = E_NOTIMPL;
 
 #ifdef VER_PRE_RELEASE
-    LOG_TRACE("pDesc->AlphaMode : {}", magic_enum::enum_name(pDesc->AlphaMode));
-    LOG_TRACE("pDesc->BufferCount : {}", pDesc->BufferCount);
-    LOG_TRACE("pDesc->BufferUsage : {}", pDesc->BufferUsage);
-    LOG_TRACE("pDesc->Flags : {}", pDesc->Flags);
-    LOG_TRACE("pDesc->Format : {}", magic_enum::enum_name(pDesc->Format));
-    LOG_TRACE("pDesc->Height : {}", pDesc->Height);
-    LOG_TRACE("pDesc->SampleDesc.Count : {}", pDesc->SampleDesc.Count);
-    LOG_TRACE("pDesc->SampleDesc.Quality : {}", pDesc->SampleDesc.Quality);
-    LOG_TRACE("pDesc->Scaling : {}", magic_enum::enum_name(pDesc->Scaling));
-    LOG_TRACE("pDesc->Stereo : {}", pDesc->Stereo);
+    LOG_TRACE("localDesc.AlphaMode : {}", magic_enum::enum_name(localDesc.AlphaMode));
+    LOG_TRACE("localDesc.BufferCount : {}", localDesc.BufferCount);
+    LOG_TRACE("localDesc.BufferUsage : {}", localDesc.BufferUsage);
+    LOG_TRACE("localDesc.Flags : {}", localDesc.Flags);
+    LOG_TRACE("localDesc.Format : {}", magic_enum::enum_name(localDesc.Format));
+    LOG_TRACE("localDesc.Height : {}", localDesc.Height);
+    LOG_TRACE("localDesc.SampleDesc.Count : {}", localDesc.SampleDesc.Count);
+    LOG_TRACE("localDesc.SampleDesc.Quality : {}", localDesc.SampleDesc.Quality);
+    LOG_TRACE("localDesc.Scaling : {}", magic_enum::enum_name(localDesc.Scaling));
+    LOG_TRACE("localDesc.Stereo : {}", localDesc.Stereo);
 
     if (pFullscreenDesc != nullptr)
     {
-        LOG_TRACE("pFullscreenDesc->RefreshRate.Denominator : {}", pFullscreenDesc->RefreshRate.Denominator);
-        LOG_TRACE("pFullscreenDesc->RefreshRate.Numerator : {}", pFullscreenDesc->RefreshRate.Numerator);
-        LOG_TRACE("pFullscreenDesc->Scaling : {}", magic_enum::enum_name(pFullscreenDesc->Scaling));
-        LOG_TRACE("pFullscreenDesc->ScanlineOrdering : {}", magic_enum::enum_name(pFullscreenDesc->ScanlineOrdering));
-        LOG_TRACE("pFullscreenDesc->Windowed : {}", pFullscreenDesc->Windowed);
+        LOG_TRACE("localFullscreenDesc.RefreshRate.Denominator : {}", localFullscreenDesc.RefreshRate.Denominator);
+        LOG_TRACE("localFullscreenDesc.RefreshRate.Numerator : {}", localFullscreenDesc.RefreshRate.Numerator);
+        LOG_TRACE("localFullscreenDesc.Scaling : {}", magic_enum::enum_name(localFullscreenDesc.Scaling));
+        LOG_TRACE("localFullscreenDesc.ScanlineOrdering : {}",
+                  magic_enum::enum_name(localFullscreenDesc.ScanlineOrdering));
+        LOG_TRACE("localFullscreenDesc.Windowed : {}", localFullscreenDesc.Windowed);
     }
 #endif
 
@@ -538,7 +539,8 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         if (!_skipFGSwapChainCreation)
         {
             ScopedSkipFGSCCreation skipFGSCCreation {};
-            FGSCResult = FGHooks::CreateSwapChainForHwnd(realFactory, real, hWnd, pDesc, pFullscreenDesc,
+            FGSCResult = FGHooks::CreateSwapChainForHwnd(realFactory, real, hWnd, &localDesc,
+                                                         pFullscreenDesc != nullptr ? &localFullscreenDesc : nullptr,
                                                          pRestrictToOutput, ppSwapChain);
 
             if (FGSCResult == S_OK)
@@ -571,8 +573,8 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
 
         {
             ScopedSkipParentWrapping skipParentWrapping {};
-            result = o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
-                                              ppSwapChain);
+            result = o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, &localDesc, pFullscreenDesc,
+                                              pRestrictToOutput, ppSwapChain);
         }
 
         if (!_skipFGSwapChainCreation)
@@ -598,14 +600,14 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
 
             if (Util::GetProcessWindow() == hWnd)
             {
-                State::Instance().screenWidth = static_cast<float>(pDesc->Width);
-                State::Instance().screenHeight = static_cast<float>(pDesc->Height);
+                State::Instance().screenWidth = static_cast<float>(localDesc.Width);
+                State::Instance().screenHeight = static_cast<float>(localDesc.Height);
             }
 
             realSC->GetDesc(&State::Instance().currentSwapchainDesc);
 
             LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (uintptr_t) *ppSwapChain, (uintptr_t) hWnd);
-            *ppSwapChain = new WrappedIDXGISwapChain4(realSC, readDevice, hWnd, pDesc->Flags, false);
+            *ppSwapChain = new WrappedIDXGISwapChain4(realSC, readDevice, hWnd, localDesc.Flags, false);
 
             LOG_DEBUG("Created new WrappedIDXGISwapChain4: {0:X}, pDevice: {1:X}", (uintptr_t) *ppSwapChain,
                       (uintptr_t) pDevice);
@@ -632,8 +634,8 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
 }
 
 HRESULT DxgiFactoryHooks::CreateSwapChainForCoreWindow(IDXGIFactory2* realFactory, IUnknown* pDevice, IUnknown* pWindow,
-                                                       DXGI_SWAP_CHAIN_DESC1* pDesc, IDXGIOutput* pRestrictToOutput,
-                                                       IDXGISwapChain1** ppSwapChain)
+                                                       const DXGI_SWAP_CHAIN_DESC1* pDesc,
+                                                       IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain)
 {
     if (State::Instance().vulkanCreatingSC)
     {
@@ -662,21 +664,24 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForCoreWindow(IDXGIFactory2* realFactor
         return realFactory->CreateSwapChainForCoreWindow(pDevice, pWindow, pDesc, pRestrictToOutput, ppSwapChain);
     }
 
-    LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, SkipWrapping: {}", pDesc->Width, pDesc->Height,
-              (UINT) pDesc->Format, pDesc->BufferCount, _skipFGSwapChainCreation);
+    DXGI_SWAP_CHAIN_DESC1 localDesc {};
+    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+
+    LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, SkipWrapping: {}", localDesc.Width, localDesc.Height,
+              (UINT) localDesc.Format, localDesc.BufferCount, _skipFGSwapChainCreation);
 
     // For vsync override
     if (Config::Instance()->OverrideVsync.value_or_default())
     {
-        pDesc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        pDesc->Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        localDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-        if (pDesc->BufferCount < 2)
-            pDesc->BufferCount = 2;
+        if (localDesc.BufferCount < 2)
+            localDesc.BufferCount = 2;
     }
 
-    State::Instance().SCAllowTearing = (pDesc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
-    State::Instance().SCLastFlags = pDesc->Flags;
+    State::Instance().SCAllowTearing = (localDesc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) > 0;
+    State::Instance().SCLastFlags = localDesc.Flags;
     State::Instance().realExclusiveFullscreen = false;
 
     ID3D12CommandQueue* cq = nullptr;
@@ -695,7 +700,7 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForCoreWindow(IDXGIFactory2* realFactor
     {
         ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
         auto result =
-            o_CreateSwapChainForCoreWindow(realFactory, pDevice, pWindow, pDesc, pRestrictToOutput, ppSwapChain);
+            o_CreateSwapChainForCoreWindow(realFactory, pDevice, pWindow, &localDesc, pRestrictToOutput, ppSwapChain);
     }
 
     if (result == S_OK)
@@ -713,11 +718,11 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForCoreWindow(IDXGIFactory2* realFactor
 
         realSC->GetDesc(&State::Instance().currentSwapchainDesc);
 
-        State::Instance().screenWidth = static_cast<float>(pDesc->Width);
-        State::Instance().screenHeight = static_cast<float>(pDesc->Height);
+        State::Instance().screenWidth = static_cast<float>(localDesc.Width);
+        State::Instance().screenHeight = static_cast<float>(localDesc.Height);
 
         LOG_DEBUG("Created new swapchain: {0:X}, hWnd: {1:X}", (UINT64) *ppSwapChain, (UINT64) pWindow);
-        *ppSwapChain = new WrappedIDXGISwapChain4(realSC, readDevice, (HWND) pWindow, pDesc->Flags, true);
+        *ppSwapChain = new WrappedIDXGISwapChain4(realSC, readDevice, (HWND) pWindow, localDesc.Flags, true);
 
         if (!_skipFGSwapChainCreation)
             State::Instance().currentSwapchain = *ppSwapChain;

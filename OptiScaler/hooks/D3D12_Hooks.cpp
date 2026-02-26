@@ -23,20 +23,20 @@ typedef HRESULT (*PFN_CheckFeatureSupport)(ID3D12Device* device, D3D12_FEATURE F
                                            UINT FeatureSupportDataSize);
 
 typedef HRESULT (*PFN_CreateCommittedResource)(ID3D12Device* device, const D3D12_HEAP_PROPERTIES* pHeapProperties,
-                                               D3D12_HEAP_FLAGS HeapFlags, D3D12_RESOURCE_DESC* pDesc,
+                                               D3D12_HEAP_FLAGS HeapFlags, const D3D12_RESOURCE_DESC* pDesc,
                                                D3D12_RESOURCE_STATES InitialResourceState,
                                                const D3D12_CLEAR_VALUE* pOptimizedClearValue, REFIID riidResource,
                                                void** ppvResource);
 
 typedef HRESULT (*PFN_CreatePlacedResource)(ID3D12Device* device, ID3D12Heap* pHeap, UINT64 HeapOffset,
-                                            D3D12_RESOURCE_DESC* pDesc, D3D12_RESOURCE_STATES InitialState,
+                                            const D3D12_RESOURCE_DESC* pDesc, D3D12_RESOURCE_STATES InitialState,
                                             const D3D12_CLEAR_VALUE* pOptimizedClearValue, REFIID riid,
                                             void** ppvResource);
 
 typedef void(STDMETHODCALLTYPE* PFN_GetResourceAllocationInfo)(ID3D12Device* device,
                                                                D3D12_RESOURCE_ALLOCATION_INFO* pResult,
                                                                UINT visibleMask, UINT numResourceDescs,
-                                                               D3D12_RESOURCE_DESC* pResourceDescs);
+                                                               const D3D12_RESOURCE_DESC* pResourceDescs);
 
 typedef HRESULT (*PFN_CreateRootSignature)(ID3D12Device* device, UINT nodeMask, const void* pBlobWithRootSignature,
                                            SIZE_T blobLengthInBytes, REFIID riid, void** ppvRootSignature);
@@ -581,21 +581,24 @@ static HRESULT hkCheckFeatureSupport(ID3D12Device* device, D3D12_FEATURE Feature
 }
 
 static HRESULT hkCreateCommittedResource(ID3D12Device* device, const D3D12_HEAP_PROPERTIES* pHeapProperties,
-                                         D3D12_HEAP_FLAGS HeapFlags, D3D12_RESOURCE_DESC* pDesc,
+                                         D3D12_HEAP_FLAGS HeapFlags, const D3D12_RESOURCE_DESC* pDesc,
                                          D3D12_RESOURCE_STATES InitialResourceState,
                                          const D3D12_CLEAR_VALUE* pOptimizedClearValue, REFIID riidResource,
                                          void** ppvResource)
 {
     if (!_skipCommitedResource)
     {
-        auto ueDesc = reinterpret_cast<UE_D3D12_RESOURCE_DESC*>(pDesc);
+        D3D12_RESOURCE_DESC localDesc = {};
+        memcpy(&localDesc, pDesc, sizeof(D3D12_RESOURCE_DESC));
+        auto ueDesc = reinterpret_cast<UE_D3D12_RESOURCE_DESC*>(&localDesc);
 
         if (Config::Instance()->UESpoofIntelAtomics64.value_or_default() && ueDesc != nullptr &&
             ueDesc->bRequires64BitAtomicSupport)
         {
             _skipCommitedResource = true;
-            auto result = IGDExtProxy::CreateCommitedResource(pHeapProperties, HeapFlags, pDesc, InitialResourceState,
-                                                              pOptimizedClearValue, riidResource, ppvResource);
+            auto result =
+                IGDExtProxy::CreateCommitedResource(pHeapProperties, HeapFlags, &localDesc, InitialResourceState,
+                                                    pOptimizedClearValue, riidResource, ppvResource);
 
             LOG_DEBUG("IGDExtProxy::hkCreateCommittedResource result: {:X}", (UINT) result);
             _skipCommitedResource = false;
@@ -611,18 +614,20 @@ static HRESULT hkCreateCommittedResource(ID3D12Device* device, const D3D12_HEAP_
 static bool skipPlacedResource = false;
 
 static HRESULT hkCreatePlacedResource(ID3D12Device* device, ID3D12Heap* pHeap, UINT64 HeapOffset,
-                                      D3D12_RESOURCE_DESC* pDesc, D3D12_RESOURCE_STATES InitialState,
+                                      const D3D12_RESOURCE_DESC* pDesc, D3D12_RESOURCE_STATES InitialState,
                                       const D3D12_CLEAR_VALUE* pOptimizedClearValue, REFIID riid, void** ppvResource)
 {
     if (!skipPlacedResource)
     {
-        auto ueDesc = reinterpret_cast<UE_D3D12_RESOURCE_DESC*>(pDesc);
+        D3D12_RESOURCE_DESC localDesc = {};
+        memcpy(&localDesc, pDesc, sizeof(D3D12_RESOURCE_DESC));
+        auto ueDesc = reinterpret_cast<UE_D3D12_RESOURCE_DESC*>(&localDesc);
 
         if (Config::Instance()->UESpoofIntelAtomics64.value_or_default() && ueDesc != nullptr &&
             ueDesc->bRequires64BitAtomicSupport)
         {
             skipPlacedResource = true;
-            auto result = IGDExtProxy::CreatePlacedResource(pHeap, HeapOffset, pDesc, InitialState,
+            auto result = IGDExtProxy::CreatePlacedResource(pHeap, HeapOffset, &localDesc, InitialState,
                                                             pOptimizedClearValue, riid, ppvResource);
             LOG_DEBUG("IGDExtProxy::hkCreatePlacedResource result: {:X}", (UINT) result);
             skipPlacedResource = false;
